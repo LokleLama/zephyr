@@ -35,7 +35,7 @@ struct pio_ws2812_config {
 
 struct pio_ws2812_data {
 	size_t tx_sm;
-	uint8_t *px_buf;
+	uint32_t *px_buf;
 	size_t px_buf_size;
 };
 
@@ -116,23 +116,19 @@ static inline void ws2812_reset_delay(uint16_t delay)
 	k_usleep(delay);
 }
 
-static int ws2812_strip_update_rgb(const struct device *dev, struct led_rgb *pixels,
-				   size_t num_pixels)
+static int ws2812_strip_update_pixels_rgb(const struct device *dev, struct led_rgb *pixels,
+				   size_t num_pixels, size_t start_pixel)
 {
 	const struct pio_ws2812_config *config = dev->config;
 	struct pio_ws2812_data *data = dev->data;
-	PIO pio = pio_rpi_pico_get_pio(config->piodev);
+	uint32_t* px_buf;
 	size_t i;
 
-	if (data->tx_sm == -1) {
-		LOG_ERR("Device is not ready");
-		return -EBUSY;
-	}
-
-	if (num_pixels > config->chain_length) {
+	if (start_pixel + num_pixels > config->chain_length) {
 		LOG_ERR("The Chain is not that long! (chain length = %i)", config->chain_length);
 		return -ENOMEM;
 	}
+	px_buf = &data->px_buf[start_pixel];
 
 	/* Convert pixel data into SPI frames. Each frame has pixel data
 	 * in color mapping on-wire format (e.g. GRB, GRBW, RGB, etc).
@@ -163,7 +159,31 @@ static int ws2812_strip_update_rgb(const struct device *dev, struct led_rgb *pix
 			}
 		}
 		pixel <<= 8 * (sizeof(uint32_t) - j);
-		pio_sm_put_blocking(pio, data->tx_sm, pixel);
+
+		px_buf[i] = pixel;
+	}
+	return 0;
+}
+
+static int ws2812_strip_update(const struct device *dev)
+{
+	const struct pio_ws2812_config *config = dev->config;
+	struct pio_ws2812_data *data = dev->data;
+	PIO pio = pio_rpi_pico_get_pio(config->piodev);
+	size_t tx_sm = data->tx_sm;
+	uint32_t* px_buf = data->px_buf;
+	size_t i;
+
+	if (tx_sm == -1) {
+		LOG_ERR("Device is not ready");
+		return -EBUSY;
+	}
+
+	/* Convert pixel data into SPI frames. Each frame has pixel data
+	 * in color mapping on-wire format (e.g. GRB, GRBW, RGB, etc).
+	 */
+	for (i = 0; i < data->px_buf_size; i++) {
+		pio_sm_put_blocking(pio, tx_sm, px_buf[i]);
 	}
 	ws2812_reset_delay(config->reset_delay);
 	return 0;
@@ -177,14 +197,15 @@ static int ws2812_strip_update_channels(const struct device *dev, uint8_t *chann
 }
 
 static const struct led_strip_driver_api ws2812_pio_api = {
-	.update_rgb = ws2812_strip_update_rgb,
+	.update = ws2812_strip_update,
+	.update_pixels_rgb = ws2812_strip_update_pixels_rgb,
 	.update_channels = ws2812_strip_update_channels,
 };
 
 #define WS2812_NUM_COLORS(idx) (DT_INST_PROP_LEN(idx, color_mapping))
 
 #define WS2812_PIO_NUM_PIXELS(idx) (DT_INST_PROP(idx, chain_length))
-#define WS2812_PIO_BUFSZ(idx)      (WS2812_NUM_COLORS(idx) * WS2812_PIO_NUM_PIXELS(idx))
+#define WS2812_PIO_BUFSZ(idx)      (WS2812_PIO_NUM_PIXELS(idx))
 
 /*
  * Retrieve the channel to color mapping (e.g. RGB, BGR, GRB, ...) from the
@@ -194,7 +215,7 @@ static const struct led_strip_driver_api ws2812_pio_api = {
 	static const uint8_t ws2812_pio_##idx##_color_mapping[] = DT_INST_PROP(idx, color_mapping)
 
 #define WS2812_PIO_DEVICE(idx)                                                                     \
-	static uint8_t ws2812_pio_##idx##_px_buf[WS2812_PIO_BUFSZ(idx)];                           \
+	static uint32_t ws2812_pio_##idx##_px_buf[WS2812_PIO_BUFSZ(idx)];                           \
 	WS2812_COLOR_MAPPING(idx);                                                                 \
 	PINCTRL_DT_INST_DEFINE(idx);                                                               \
 	static const struct pio_ws2812_config pio_ws2812##idx##_config = {                         \

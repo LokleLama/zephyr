@@ -52,14 +52,23 @@ struct led_rgb {
 };
 
 /**
- * @typedef led_api_update_rgb
- * @brief Callback API for updating an RGB LED strip
+ * @typedef led_api_update_pixels_rgb
+ * @brief Callback API for updating specific RGB pixels on the LED strip
  *
- * @see led_strip_update_rgb() for argument descriptions.
+ * @see led_api_update_pixels_rgb() for argument descriptions.
  */
-typedef int (*led_api_update_rgb)(const struct device *dev,
+typedef int (*led_api_update_pixels_rgb)(const struct device *dev,
 				  struct led_rgb *pixels,
-				  size_t num_pixels);
+				  size_t num_pixels,
+				  size_t start_pixel);
+
+/**
+ * @typedef led_api_update
+ * @brief Callback API for updating the LED strip
+ *
+ * @see led_api_update() for argument descriptions.
+ */
+typedef int (*led_api_update)(const struct device *dev);
 
 /**
  * @typedef led_api_update_channels
@@ -77,7 +86,8 @@ typedef int (*led_api_update_channels)(const struct device *dev,
  * This is the mandatory API any LED strip driver needs to expose.
  */
 struct led_strip_driver_api {
-	led_api_update_rgb update_rgb;
+	led_api_update_pixels_rgb update_pixels_rgb;
+	led_api_update update;
 	led_api_update_channels update_channels;
 };
 
@@ -102,7 +112,57 @@ static inline int led_strip_update_rgb(const struct device *dev,
 	const struct led_strip_driver_api *api =
 		(const struct led_strip_driver_api *)dev->api;
 
-	return api->update_rgb(dev, pixels, num_pixels);
+	int err = api->update_pixels_rgb(dev, pixels, num_pixels, 0);
+	if (err != 0) {
+		return err;
+	}
+	return api->update(dev);
+}
+
+/**
+ * @brief Update specific LED pixels on a strip made of RGB pixels
+ *
+ * Important:
+ *     This routine may overwrite @a pixels.
+ *
+ * This routine does NOT immediately updates the strip display.
+ * For updating the LEDs on the strip the led_strip_update() must
+ * be called.
+ *
+ * @param dev LED strip device
+ * @param pixels Array of pixel data
+ * @param num_pixels Length of pixels array
+ * @param start_pixel Offset for the first pixel that will be updated
+ * @return 0 on success, negative on error
+ * @warning May overwrite @a pixels
+ */
+static inline int led_strip_update_pixels_rgb(const struct device *dev,
+				       struct led_rgb *pixels,
+				       size_t num_pixels,
+				       size_t start_pixel) {
+	const struct led_strip_driver_api *api =
+		(const struct led_strip_driver_api *)dev->api;
+
+	return api->update_pixels_rgb(dev, pixels, num_pixels, start_pixel);
+}
+
+/**
+ * @brief Update an LED strip made of RGB pixels
+ *
+ * Important:
+ *     This routine may overwrite @a pixels.
+ *
+ * This routine immediately updates the strip display.
+ *
+ * @param dev LED strip device
+ * @return 0 on success, negative on error
+ * @warning May overwrite @a pixels
+ */
+static inline int led_strip_update(const struct device *dev) {
+	const struct led_strip_driver_api *api =
+		(const struct led_strip_driver_api *)dev->api;
+
+	return api->update(dev);
 }
 
 /**

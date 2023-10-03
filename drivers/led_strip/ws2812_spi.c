@@ -91,27 +91,21 @@ static inline void ws2812_reset_delay(uint16_t delay)
 	k_usleep(delay);
 }
 
-static int ws2812_strip_update_rgb(const struct device *dev,
+static int ws2812_strip_update_pixels_rgb(const struct device *dev,
 				   struct led_rgb *pixels,
-				   size_t num_pixels)
+				   size_t num_pixels,
+				   size_t start_pixel)
 {
 	const struct ws2812_spi_cfg *cfg = dev_cfg(dev);
 	const uint8_t one = cfg->one_frame, zero = cfg->zero_frame;
-	struct spi_buf buf = {
-		.buf = cfg->px_buf,
-		.len = cfg->px_buf_size,
-	};
-	const struct spi_buf_set tx = {
-		.buffers = &buf,
-		.count = 1
-	};
 	uint8_t *px_buf = cfg->px_buf;
 	size_t i;
-	int rc;
 
-	if (!num_pixels_ok(cfg, num_pixels)) {
+	if (!num_pixels_ok(cfg, start_pixel + num_pixels)) {
 		return -ENOMEM;
 	}
+
+	px_buf += start_pixel *8 *cfg->num_colors;
 
 	/*
 	 * Convert pixel data into SPI frames. Each frame has pixel data
@@ -144,6 +138,21 @@ static int ws2812_strip_update_rgb(const struct device *dev,
 			px_buf += 8;
 		}
 	}
+
+	return 0;
+}
+
+static int ws2812_strip_update(const struct device *dev)
+{
+	const struct ws2812_spi_cfg *cfg = dev_cfg(dev);
+	struct spi_buf buf = {
+		.buf = cfg->px_buf,
+		.len = cfg->px_buf_size,
+	};
+	const struct spi_buf_set tx = {
+		.buffers = &buf,
+		.count = 1
+	};
 
 	/*
 	 * Display the pixel data.
@@ -191,7 +200,8 @@ static int ws2812_spi_init(const struct device *dev)
 }
 
 static const struct led_strip_driver_api ws2812_spi_api = {
-	.update_rgb = ws2812_strip_update_rgb,
+	.update = ws2812_strip_update,
+	.update_pixels_rgb = ws2812_strip_update_pixels_rgb,
 	.update_channels = ws2812_strip_update_channels,
 };
 
