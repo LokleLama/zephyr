@@ -14,3 +14,9 @@ compatible: "worldsemi,ws2812-pio"
 
 include: [ws2812.yaml, "raspberrypi,pico-pio-device.yaml"]
 
+properties:
+  baudrate:
+    type: int
+    default: 800000
+    description: |
+      The baudrate used for the communication with the LEDs

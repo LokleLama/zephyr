@@ -207,16 +207,9 @@ static const struct led_strip_driver_api ws2812_pio_api = {
 #define WS2812_PIO_NUM_PIXELS(idx) (DT_INST_PROP(idx, chain_length))
 #define WS2812_PIO_BUFSZ(idx)      (WS2812_PIO_NUM_PIXELS(idx))
 
-/*
- * Retrieve the channel to color mapping (e.g. RGB, BGR, GRB, ...) from the
- * "color-mapping" DT property.
- */
-#define WS2812_COLOR_MAPPING(idx)                                                                  \
-	static const uint8_t ws2812_pio_##idx##_color_mapping[] = DT_INST_PROP(idx, color_mapping)
-
 #define WS2812_PIO_DEVICE(idx)                                                                     \
-	static uint32_t ws2812_pio_##idx##_px_buf[WS2812_PIO_BUFSZ(idx)];                           \
-	WS2812_COLOR_MAPPING(idx);                                                                 \
+	static uint32_t ws2812_pio_##idx##_px_buf[WS2812_PIO_BUFSZ(idx)];                          \
+	static const uint8_t ws2812_pio_##idx##_color_mapping[] = DT_INST_PROP(idx, color_mapping);\
 	PINCTRL_DT_INST_DEFINE(idx);                                                               \
 	static const struct pio_ws2812_config pio_ws2812##idx##_config = {                         \
 		.piodev = DEVICE_DT_GET(DT_INST_PARENT(idx)),                                      \
@@ -226,7 +219,7 @@ static const struct led_strip_driver_api ws2812_pio_api = {
 		.num_colors = WS2812_NUM_COLORS(idx),                                              \
 		.color_mapping = ws2812_pio_##idx##_color_mapping,                                 \
 		.reset_delay = DT_INST_PROP(idx, reset_delay),                                     \
-		.baudrate = 800000,                                                                \
+		.baudrate = DT_PROP_OR(idx, baudrate, 800000),                                     \
 	};                                                                                         \
 	static struct pio_ws2812_data pio_ws2812##idx##_data = {                                   \
 		.px_buf = ws2812_pio_##idx##_px_buf,                                               \
