@@ -7,6 +7,7 @@
 #define DT_DRV_COMPAT worldsemi_ws2812_pio
 
 #include <zephyr/drivers/led_strip.h>
+#include <zephyr/drivers/led_strip/ws2812_pio.h>
 #include <zephyr/drivers/pinctrl.h>
 
 #include <string.h>
@@ -35,6 +36,7 @@ struct pio_ws2812_config {
 
 struct pio_ws2812_data {
 	size_t tx_sm;
+	led_api_color_converter converter;
 	uint32_t *px_buf;
 	size_t px_buf_size;
 };
@@ -45,7 +47,7 @@ RPI_PICO_PIO_DEFINE_PROGRAM(ws2818_tx, 0, 3,
 			    0x1123, /* 1: jmp    !x, 3     side 1 [1] */
 			    0x1400, /* 2: jmp    0         side 1 [4] */
 			    0xa442, /* 3: nop              side 0 [4] */
-				    /*    .wrap                       */
+			            /*    .wrap                       */
 );
 
 #define CYCLES_PER_BIT    10
@@ -85,7 +87,9 @@ static int ws2812_pio_init(const struct device *dev)
 {
 	const struct pio_ws2812_config *config = dev->config;
 	struct pio_ws2812_data *data = dev->data;
+	uint32_t converter_code = 0;
 	size_t tx_sm;
+	size_t j;
 	float sm_clock_div;
 	int retval;
 	PIO pio;
@@ -103,6 +107,20 @@ static int ws2812_pio_init(const struct device *dev)
 	retval = pio_ws2818_init(pio, tx_sm, config->tx_pin, sm_clock_div, config->num_colors * 8);
 	if (retval < 0) {
 		return retval;
+	}
+
+	for (j = 0; j < config->num_colors; j++) {
+		converter_code <<= 4;
+		converter_code |= config->color_mapping[j] & 0x0F;
+	}
+	switch(converter_code){
+		case 0x0123: data->converter = led_strip_convert_to_rgb0; break;
+		case 0x0132: data->converter = led_strip_convert_to_rbg0; break;
+		case 0x0213: data->converter = led_strip_convert_to_grb0; break;
+		case 0x0231: data->converter = led_strip_convert_to_gbr0; break;
+		case 0x0312: data->converter = led_strip_convert_to_brg0; break;
+		case 0x0321: data->converter = led_strip_convert_to_bgr0; break;
+		default: LOG_ERR("Unsupported Color ordering detected (0x%04X)", converter_code); break;
 	}
 
 	return pinctrl_apply_state(config->pcfg, PINCTRL_STATE_DEFAULT);
@@ -128,39 +146,19 @@ static int ws2812_strip_update_pixels_rgb(const struct device *dev, struct led_r
 		LOG_ERR("The Chain is not that long! (chain length = %i)", config->chain_length);
 		return -ENOMEM;
 	}
+
+	if (data->converter == NULL) {
+		LOG_ERR("No Color Converter found");
+		return -ENOMEM;
+	}
+
 	px_buf = &data->px_buf[start_pixel];
 
 	/* Convert pixel data into SPI frames. Each frame has pixel data
 	 * in color mapping on-wire format (e.g. GRB, GRBW, RGB, etc).
 	 */
 	for (i = 0; i < num_pixels; i++) {
-		uint8_t j;
-		uint32_t pixel = 0;
-
-		for (j = 0; j < config->num_colors; j++) {
-			pixel <<= 8;
-			switch (config->color_mapping[j]) {
-			// White channel is not supported by LED strip API. *
-			case LED_COLOR_ID_WHITE:
-				pixel |= 0;
-				break;
-			case LED_COLOR_ID_RED:
-				pixel |= ((uint32_t)pixels[i].r);
-				break;
-			case LED_COLOR_ID_GREEN:
-				pixel |= ((uint32_t)pixels[i].g);
-				break;
-			case LED_COLOR_ID_BLUE:
-				pixel |= ((uint32_t)pixels[i].b);
-				break;
-			default:
-				LOG_ERR("Invalid Color ID detected");
-				return -EINVAL;
-			}
-		}
-		pixel <<= 8 * (sizeof(uint32_t) - j);
-
-		px_buf[i] = pixel;
+		px_buf[i] = data->converter(&pixels[i]);
 	}
 	return 0;
 }
@@ -223,6 +221,7 @@ static const struct led_strip_driver_api ws2812_pio_api = {
 	};                                                                                         \
 	static struct pio_ws2812_data pio_ws2812##idx##_data = {                                   \
 		.px_buf = ws2812_pio_##idx##_px_buf,                                               \
+		.converter = NULL,                                                                 \
 		.px_buf_size = WS2812_PIO_BUFSZ(idx),                                              \
 		.tx_sm = -1,                                                                       \
 	};                                                                                         \
